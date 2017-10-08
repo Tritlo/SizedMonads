@@ -16,10 +16,11 @@ import Data.Type.Bool
 import Unsafe.Coerce
 import Control.Monad.Trans.Class
 import Data.Proxy
+import Data.Type.Equality
 
 -- Type level Max (imilian hehehe)
 type family Max (a :: Nat) (b :: Nat) where
-  Max a b = If (a <=? b) b a
+  Max a b = If (CmpNat a b == 'LT) b a
 
 
 class KnownNat s => SizedFunctor f s where
