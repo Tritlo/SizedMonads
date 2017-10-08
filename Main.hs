@@ -43,6 +43,13 @@ t2 = wrapWithExplicitSize (Proxy :: Proxy 0) (putStrLn "the max of:")
   Sized.>>= \_ -> (\_ _ -> ()) Sized.<$>  three Sized.<*> six
   Sized.>>= \_ -> wrapWithExplicitSize (Proxy :: Proxy 0) (putStrLn "is six!")
 
+-- We can also put an upper bound on the size,
+-- which is useful for e.g. development.
+t3 :: SizedIO 8 ()
+t3 = isAtMost (Proxy :: Proxy 8) t2
+   Sized.>>= \_ -> wrapWithSize $ putStrLn "which is less than eight!"
+
+
 -- Main.hs:56:14: error:
 --     • Couldn't match type ‘2’ with ‘1’
 --       Expected type: SizedIO 1 ()
@@ -61,3 +68,5 @@ main = do
   runSizedT t1
   putStrLn "Running t2:"
   runSizedT t2
+  putStrLn "Running t3:"
+  runSizedT t3

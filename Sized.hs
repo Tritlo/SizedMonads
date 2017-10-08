@@ -54,15 +54,14 @@ newtype Flip2 g t s v = Flip2 {fromF2 :: g s t v}
 -- to wrap a non sized monad.
 newtype SizedT m (n :: Nat) a = SizedT { runSizedT :: m a}
 
-wrapWithSize :: f a -> SizedT f n a
+wrapWithSize :: (0 <= n) =>  f a -> SizedT f n a
 wrapWithSize = unsafeCoerce
 
 wrapWithExplicitSize :: KnownNat n => Proxy n -> f a -> SizedT f n a
-wrapWithExplicitSize _ = unsafeCoerce
+wrapWithExplicitSize _ = wrapWithSize
 
-isAtMost :: (KnownNat n, KnownNat m, n <= m) => Proxy n -> SizedT f m a
-isAtMost = unsafeCoerce
-
+isAtMost :: (KnownNat n, KnownNat m, n <= m) => Proxy m -> SizedT f n a -> SizedT f m a
+isAtMost _ = unsafeCoerce
 
 instance (KnownNat n, Functor f) => SizedFunctor (SizedT f) n where
   fmap f a = wrapWithSize (Prelude.fmap f (runSizedT a))
