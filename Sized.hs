@@ -14,14 +14,12 @@ module Sized where
 import GHC.TypeLits
 import Data.Type.Bool
 import Unsafe.Coerce
-import Control.Monad.Trans.Class
 import Data.Proxy
 import Data.Type.Equality
 
--- Type level Max (imilian hehehe)
+-- Type level Maximum function
 type family Max (a :: Nat) (b :: Nat) where
   Max a b = If (CmpNat a b == 'LT) b a
-
 
 class KnownNat s => SizedFunctor f s where
   fmap :: (a -> b) -> f s a -> f s b
@@ -47,7 +45,7 @@ instance KnownNat n => SizedFunctor Vec n where
   fmap f (a :- as) = (f a) :- (Sized.fmap f as)
 
 
--- Type level flip
+-- Type level flip, taken from https://github.com/GU-CLASP/TypedFlow/blob/8604312e4c36533b6b7dae7117378ca44bef7fbf/TypedFlow/Types.hs#L215
 newtype Flip g t s = Flip {fromF :: g s t}
 newtype Flip2 g t s v = Flip2 {fromF2 :: g s t v}
 
