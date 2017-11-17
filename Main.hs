@@ -10,42 +10,42 @@
 
 module Main where
 
-import Sized
+import SizedGADT
 import Data.Proxy
 
 
 one :: SizedIO 1 ()
-one = wrapWithSize $ putStrLn "one"
+one = Op $ putStrLn "one"
 
 two :: SizedIO 2 ()
-two = wrapWithSize $ putStrLn "two"
+two = Op $ putStrLn "two"
 
 three :: SizedIO 3 ()
-three = wrapWithSize $ putStrLn "three"
+three = Op $ putStrLn "three"
 
 -- When doing one operation after another,
 -- We add the cost of the operations together
 six :: SizedIO 6 ()
-six = (wrapWithExplicitSize (Proxy :: Proxy 0) (putStrLn "sum of: "))
+six = (NoOp (putStrLn "sum of: "))
   |>> one
   |>> two
   |>> three
-  |>> (wrapWithExplicitSize (Proxy :: Proxy 0) $ putStrLn "is six")
+  |>> (NoOp $ putStrLn "is six")
 
 t1 = six
 
 -- When doing the Applicative thing (i.e. in parallel), we take the
 -- maximum of each side.
 t2 :: SizedIO 6 ()
-t2 = wrapWithExplicitSize (Proxy :: Proxy 0) (putStrLn "the max of:")
+t2 = NoOp (putStrLn "the max of:")
   |>> (\_ _ -> ()) |<$> three |<*> six
-  |>> (wrapWithExplicitSize (Proxy :: Proxy 0) (putStrLn "is six!"))
+  |>> (NoOp (putStrLn "is six!"))
 
 -- We can also put an upper bound on the size,
 -- which is useful for e.g. development.
 t3 :: SizedIO 8 ()
 t3 = isAtMost (Proxy :: Proxy 8) t2
-   |>> (wrapWithSize $ putStrLn "which is less than eight!")
+   |>> (Op $ putStrLn "which is less than eight!")
 
 
 -- Main.hs:56:14: error:
@@ -66,5 +66,5 @@ main = do
   runSizedT t1
   putStrLn "Running t2:"
   runSizedT t2
-  putStrLn "Running t3:"
-  runSizedT t3
+  -- putStrLn "Running t3:"
+  -- runSizedT t3
