@@ -34,11 +34,10 @@ class KnownNat s => SizedFunctor f s where
 
 class (SizedFunctor f s) => SizedApplicative f s  where
   pure :: a -> f 0 a
-  (|<*>) :: (
-    SizedApplicative f t,
-    SizedApplicative f v,
-    s ~ Max t v) => f t (a -> b) -> f v a -> f s b
-
+  (|<*>) :: ( SizedApplicative f t
+            , SizedApplicative f v
+            , s ~ Max t v)
+         => f t (a -> b) -> f v a -> f s b
 
 class (KnownNat s, SizedApplicative m s) => SizedMonad m s where
   return :: SizedMonad m s => a -> m 0 a
@@ -48,21 +47,9 @@ class (KnownNat s, SizedApplicative m s) => SizedMonad m s where
 a |>> b = a |>>= (\_ -> b)
 
 
--- data SizedT m (n :: Nat) a where
---     Op :: Monad m => Nat -> m a -> a -> SizedT m n a
---     NoOp :: Monad m => m a -> a -> SizedT m 0 a
-
 data SizedT m (n :: Nat) a where
     Op :: m a -> SizedT m n a
     NoOp :: m a -> SizedT m 0 a
-
--- stM :: SizedT m (n :: Nat) a -> m a
--- stM (Op m _) = m
--- stM (NoOp m) = m
-
--- stN :: SizedT m s a -> Nat
--- stN (NoOp _) = 0
--- stN (Op _ n) = n
 
 wrapWithSize :: (0 <= n) =>  f a -> SizedT f n a
 wrapWithSize m = Op m
@@ -74,16 +61,16 @@ isAtMost :: (KnownNat n, KnownNat m, n <= m) => Proxy m -> SizedT f n a -> Sized
 isAtMost _ (NoOp m) = Op m
 isAtMost _ (Op m) = Op m
 
--- unwrap :: SizedT f n a -> f a
--- unwrap = unsafeCoerce
-
--- wrap :: (0 <= n) => f a -> SizedT f n a
--- wrap = unsafeCoerce
-
 instance (KnownNat n, Functor f) => SizedFunctor (SizedT f) n where
   fmap f (Op m) = Op $ Prelude.fmap f m
   fmap f (NoOp m) = NoOp $ Prelude.fmap f m
 
+runSizedT :: SizedT m n a -> m a
+runSizedT (Op m) = m
+runSizedT (NoOp m) = m
+
+guardedRunSizedT :: (0 <= n, n <= m) -> Proxy m -> SizedT m n a -> m a
+guardedRunSizedT _ = runSizedT
 
 instance (KnownNat n, Applicative f) => SizedApplicative (SizedT f) n where
   pure = NoOp . Prelude.pure
@@ -94,24 +81,7 @@ instance (KnownNat n, Applicative f) => SizedApplicative (SizedT f) n where
 
 instance (KnownNat n, Monad m) => SizedMonad (SizedT m) n where
   return = NoOp . Prelude.return
-  (Op ma) |>>= mb = Op $ ma >>= (\k -> case mb k of
-    NoOp m -> m
-    Op m -> m)
   -- We want NoOp >>= (\k -> NoOp m) to be NoOp though
-  (NoOp ma) |>>= mb = Op $ ma >>= (\k -> case mb k of
-    NoOp m -> m
-    Op m -> m)
+  stma |>>= mb = Op $ runSizedT stma >>= runSizedT . mb
 
 type SizedIO = SizedT IO
-
-runSizedT :: SizedT m n a -> m a
-runSizedT (Op m) = m
-runSizedT (NoOp m) = m
-  
-  -- (Op $ ma >>= (\k -> case fmb k of
-  --   NoOp mb -> mb
-  --   Op mb -> mb)) :: SizedT m t b
-
-
-
---   a |>>= b = wrapWithSize $ (runSizedT a) >>= (\k -> runSizedT $ b k)
