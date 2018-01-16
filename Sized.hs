@@ -7,78 +7,116 @@
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 
 module Sized where
 
 import GHC.TypeLits
 import Data.Type.Bool
-import Unsafe.Coerce
 import Data.Proxy
 import Data.Type.Equality
+import Debug.Trace
 
 -- Type level Maximum function
-type family Max (a :: Nat) (b :: Nat) where
-  Max a b = If (CmpNat a b == 'LT) b a
-
-infixl 1  |>>, |>>=
-infixl 4 |<*>, |<$>
-
-class KnownNat s => SizedFunctor f s where
-  fmap :: (a -> b) -> f s a -> f s b
-
--- | A synonym for fmap
-(|<$>) :: SizedFunctor f s =>  (a -> b) -> f s a -> f s b
-(|<$>) = Sized.fmap
-
-class (SizedFunctor f s) => SizedApplicative f s  where
-  pure :: a -> f s a
-  (|<*>) :: (SizedApplicative f t, SizedApplicative f v, s ~ Max t v) => f t (a -> b) -> f v a -> f s b
+type family Max (a :: Nat) (b :: Nat) :: Nat where
+  Max a 0 = a
+  Max 0 b = b
+  Max a b = If (a <=? b) b a
 
 
-class (KnownNat s, SizedApplicative m s) => SizedMonad m s where
-  return :: SizedMonad m s => a -> m s a
-  (|>>=) :: SizedMonad m t => m s a -> (a -> m t b) -> m (s + t) b
+class SizedFunctor f where
+  sfmap :: (a -> b) -> f i a -> f i b
+  (|<$) :: a -> f i b -> f i a
+  (|<$) = sfmap . const
 
-(|>>) :: (SizedMonad m s, SizedMonad m t) => m s a -> m t b -> m (s + t) b
-a |>> b = a |>>= (\_ -> b)
+(|<$>) :: (SizedFunctor f) => (a -> b) -> f i a -> f i b
+f |<$> b = sfmap f b
 
-data Vec n a where
-  Nil :: Vec 0 a
-  (:-) :: KnownNat n => a -> Vec n a -> Vec (n + 1) a
+class (SizedFunctor f) => SizedApplicative f where
+  spure :: a -> f 0 a
+  (|<*>) ::  (k ~ Max i j) => f i (a -> b) -> f j a -> f k b
 
-instance KnownNat n => SizedFunctor Vec n where
-  fmap _ Nil = Nil
-  fmap f (a :- as) = (f a) :- (Sized.fmap f as)
+  -- You can only sequence free stuff
+  -- This type is a bit weird, but without it (and then defining
+  -- (>>) as (|*>)), you get a lot of ambigous type variables from
+  -- ApplicativeDo.
+  (|*>) :: f i a -> f 0 b -> f i b
+  a |*> b = (id |<$ a) |<*> b
+
+class SizedApplicative m  => SizedMonad m  where
+  (|>>=) ::  m i a -> (a -> m j b) -> m (i + j)  b
+
+  sreturn :: a -> m 0 a
+  sreturn = spure
+
+  join :: m i (m j a) -> m (i + j)  a
+  join m = m |>>= id
+
+  -- This should never be used, since
+  -- we never want to sequence without dependencies
+  -- those should only be done with appliatives.
+  -- but we have this here to allow explicit forcing of sequencing
+  -- Use (*>) to express sequencing.
+  (|>>) :: m i a -> m j b -> m (i+j) b
+  a |>> b = a |>>= (\_ -> b)
 
 
--- Type level flip, taken from https://github.com/GU-CLASP/TypedFlow/blob/8604312e4c36533b6b7dae7117378ca44bef7fbf/TypedFlow/Types.hs#L215
-newtype Flip g t s = Flip {fromF :: g s t}
-newtype Flip2 g t s v = Flip2 {fromF2 :: g s t v}
 
--- | We write a simple "transformer" (i.e MonadTrans (Flip2 SizedT n))
--- to wrap a non sized monad.
-newtype SizedT m (n :: Nat) a = SizedT { runSizedT :: m a}
+data SizedT m (i :: Nat)  a where
+  Op :: Proxy i -> m a -> SizedT m i a
+  NoOp :: m a -> SizedT m 0 a
 
-wrapWithSize :: (0 <= n) =>  f a -> SizedT f n a
-wrapWithSize = unsafeCoerce
+wrapWithSize :: m a -> SizedT m 0 a
+wrapWithSize = NoOp
 
-wrapWithExplicitSize :: KnownNat n => Proxy n -> f a -> SizedT f n a
-wrapWithExplicitSize _ = wrapWithSize
+wrapWithCost :: (0 <= i) => Proxy i -> m a -> SizedT m i a
+wrapWithCost = Op
 
-isAtMost :: (KnownNat n, KnownNat m, n <= m) => Proxy m -> SizedT f n a -> SizedT f m a
-isAtMost _ = unsafeCoerce
+isAtMost :: (n <= i) => Proxy i -> SizedT m n a -> SizedT m i a
+isAtMost x (Op _ a) = Op x a
+isAtMost x (NoOp a) = Op x a
 
-instance (KnownNat n, Functor f) => SizedFunctor (SizedT f) n where
-  fmap f a = wrapWithSize (Prelude.fmap f (runSizedT a))
+runSizedT :: SizedT m i a -> m a
+runSizedT (Op _ m) = m
+runSizedT (NoOp m) = m
 
-instance (KnownNat n, Applicative f) => SizedApplicative (SizedT f) n where
-  pure = wrapWithSize . Prelude.pure
-  a |<*> b = wrapWithSize $ (runSizedT a) <*> (runSizedT b)
 
-instance (KnownNat n, Monad m) => SizedMonad (SizedT m) n where
-  return = wrapWithSize . Prelude.return
-  a |>>= b = wrapWithSize $ (runSizedT a) >>= (\k -> runSizedT $ b k)
+instance Functor f => SizedFunctor (SizedT f) where
+  sfmap f (Op x a) = Op x (fmap f a)
+  sfmap f (NoOp a) = NoOp (fmap f a)
+
+instance Applicative f => SizedApplicative (SizedT f) where
+  spure = NoOp . pure
+  -- (NoOp a) |*> (NoOp b) = NoOp (a *> b)
+  -- (Op x a) |*> (NoOp b) = Op x (a *> b)
+  -- (NoOp a) |*> (Op y b) = NoOp (a *> b)
+  -- (Op (x :: Proxy i) a) |*> (Op (y :: Proxy j) b) = Op x (a *> b)
+
+  (NoOp a) |<*> (NoOp b) = NoOp (a <*> b)
+  (NoOp a) |<*> (Op y b) = Op y (a <*> b)
+  (Op x a) |<*> (NoOp b) = Op x (a <*> b)
+  (Op (x :: Proxy i) a) |<*> (Op (y :: Proxy j) b) = Op (Proxy :: Proxy (Max i j)) (a <*> b)
+
+
+instance Monad m => SizedMonad (SizedT m) where
+  (Op (Proxy :: Proxy i) a) |>>= (m :: a -> SizedT m j b) = Op (Proxy :: Proxy (i + j)) (a >>= (\k -> runSizedT $ m k))
+  (NoOp a) |>>= (m :: a -> SizedT m j b) = Op (Proxy :: Proxy i) (a >>= (\k -> runSizedT $ m k))
+
+
+
+-- All SizedT are functors for KnownNats
+instance  (KnownNat t, Functor f) => Functor (SizedT f t)  where
+  fmap = sfmap
+
+-- 0 has instances for all of these, since  Max 0 0 = 0 and (0+0) = 0
+instance Applicative f => Applicative (SizedT f 0)  where
+  pure = pure
+  (<*>) = (<*>)
+
+instance Monad m => Monad (SizedT m 0) where
+    return = sreturn
+    (>>=) = (|>>=)
 
 
 type SizedIO = SizedT IO
